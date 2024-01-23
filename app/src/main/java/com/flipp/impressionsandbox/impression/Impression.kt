@@ -203,7 +203,8 @@ class DefaultImpressionState(
   }
 
   companion object {
-    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 1000L
+//    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 1000L
+    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 250L
     const val DEFAULT_CHECK_INTERVAL_MS: Long = 1000L
     const val DEFAULT_VISIBLE_RATIO: Float = 0.5F
   }
