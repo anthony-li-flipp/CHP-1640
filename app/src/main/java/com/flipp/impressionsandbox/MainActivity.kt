@@ -27,8 +27,8 @@ import androidx.compose.material.TabRowDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -180,12 +180,20 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Screen4() {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            LargeCardPreview(count = 102)
+        val items = remember { mutableStateListOf<Int>()}
+        Column {
+            Row {
+                Button(onClick = { items.add(items.size) }) { Text(text = "Add") }
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                state = rememberLazyListState(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(items) { count -> LargeCardPreview(count = count) }
+            }
         }
     }
 
