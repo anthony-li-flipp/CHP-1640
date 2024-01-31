@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.flipp.dl.design.composables.LargeCard
 import com.flipp.dl.design.composables.SmallCard
 import com.flipp.impressionsandbox.impression.impression
+import com.flipp.impressionsandbox.impression.impression2
 import com.flipp.impressionsandbox.ui.theme.ImpressionSandboxTheme
 import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
@@ -56,23 +57,50 @@ class MainActivity : ComponentActivity() {
         private val TAG = MainActivity::class.java.simpleName
     }
 
-    @OptIn(ExperimentalPagerApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var isDarkTheme by remember { mutableStateOf(false) }
+//            LazyColumn {
+//                item { LargeCardPreview(count = 101) }
+//                item { LargeCardPreview(count = 102) }
+//                item { LargeCardPreview(count = 103) }
+//                item { LargeCardPreview(count = 104) }
+//                item {
+//                    Box(Modifier.impression2(105) {
+//                        Log.d(TAG, "Impression 105")
+//                    }) {
+//                        LargeCardPreview(count = 105)
+//                    }
+//                }
+////                item {
+////                    Box(Modifier.impression2(106) {
+////                        Log.d(TAG, "Impression 106")
+////                    }) {
+////                        LargeCardPreview(count = 106)
+////                    }}
+//                item { LargeCardPreview(count = 107) }
+//                item { LargeCardPreview(count = 108) }
+//                item { LargeCardPreview(count = 109) }
+//                item { LargeCardPreview(count = 110) }
+//                item { LargeCardPreview(count = 111) }
+            Experiment()
+        }
+    }
 
-            ImpressionSandboxTheme(darkTheme = isDarkTheme) {
-                val pagerState = rememberPagerState(pageCount = 4)
-                Column(modifier = Modifier.fillMaxSize()) {
-                    TabLayout(listOf("Screen 1", "Screen 2", "Screen 3", "Screen 4"), pagerState)
-                    HorizontalPager(state = pagerState) { index ->
-                        when (index) {
-                            0 -> Screen1 { isDarkTheme = isDarkTheme.not() }
-                            1 -> Screen2()
-                            2 -> Screen3()
-                            3 -> Screen4()
-                        }
+    @OptIn(ExperimentalPagerApi::class)
+    @Composable
+    fun Experiment() {
+        var isDarkTheme by remember { mutableStateOf(false) }
+        ImpressionSandboxTheme(darkTheme = isDarkTheme) {
+            val pagerState = rememberPagerState(pageCount = 4)
+            Column(modifier = Modifier.fillMaxSize()) {
+                TabLayout(listOf("Screen 1", "Screen 2", "Screen 3", "Screen 4"), pagerState)
+                HorizontalPager(state = pagerState) { index ->
+                    when (index) {
+                        0 -> Screen1 { isDarkTheme = isDarkTheme.not() }
+                        1 -> Screen2()
+                        2 -> Screen3()
+                        3 -> Screen4()
                     }
                 }
             }
@@ -149,8 +177,20 @@ class MainActivity : ComponentActivity() {
                         state = rememberLazyListState(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
-                    ) { items((31..50).toList()) { count -> SmallCardPreview(count = count) } }
-                    else LargeCardPreview(count = count)
+                    ) {
+                        items((31..50).toList()) { count ->
+                            Box(modifier = Modifier.impression2(count) {
+                                Log.d(TAG, "SmallCard impression $count.")
+                            }) {
+                                SmallCardPreview(count = count)
+                            }
+                        }
+                    }
+                    else Box(modifier = Modifier.impression2(count) {
+                        Log.d(TAG, "LargeCard impression $count.")
+                    }) {
+                        LargeCardPreview(count = count)
+                    }
                 }
             }
         }
@@ -174,13 +214,17 @@ class MainActivity : ComponentActivity() {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            SmallCardPreview(count = 101)
+            Box(modifier = Modifier.impression2(101) {
+                Log.d(TAG, "SmallCard impression $101.")
+            }) {
+                SmallCardPreview(count = 101)
+            }
         }
     }
 
     @Composable
     private fun Screen4() {
-        val items = remember { mutableStateListOf<Int>()}
+        val items = remember { mutableStateListOf<Int>() }
         Column {
             Row {
                 Button(onClick = { items.add(items.size) }) { Text(text = "Add") }
@@ -192,71 +236,67 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(items) { count -> LargeCardPreview(count = count) }
+                items(items) { count ->
+                    Box(modifier = Modifier.impression2(count) {
+                        Log.d(TAG, "LargeCard impression $count.")
+                    }) { LargeCardPreview(count = count) }
+                }
             }
         }
     }
 
     @Composable
     private fun LargeCardPreview(count: Int) {
-        Box(modifier = Modifier.impression(count) {
-            Log.d(TAG, "LargeCard impression $count.")
-        }) {
-            LargeCard(
-                title = "Sample Large Card $count",
-                titleThumbnailImage = {
-                    Image(
-                        modifier = Modifier.fillMaxWidth(),
-                        painter = painterResource(R.drawable.logo),
-                        contentScale = ContentScale.FillWidth,
-                        contentDescription = null
-                    )
-                },
-                contentThumbnailImage = {
-                    Image(
-                        modifier = Modifier.fillMaxWidth(),
-                        painter = painterResource(R.drawable.flyer),
-                        contentScale = ContentScale.FillWidth,
-                        contentDescription = null
-                    )
-                },
-                iconButtonImage = {
-                    Image(
-                        modifier = Modifier.fillMaxWidth(),
-                        painter = painterResource(R.drawable.logo),
-                        contentScale = ContentScale.FillWidth,
-                        contentDescription = null
-                    )
-                })
-        }
+        LargeCard(
+            title = "Sample Large Card $count",
+            titleThumbnailImage = {
+                Image(
+                    modifier = Modifier.fillMaxWidth(),
+                    painter = painterResource(R.drawable.logo),
+                    contentScale = ContentScale.FillWidth,
+                    contentDescription = null
+                )
+            },
+            contentThumbnailImage = {
+                Image(
+                    modifier = Modifier.fillMaxWidth(),
+                    painter = painterResource(R.drawable.flyer),
+                    contentScale = ContentScale.FillWidth,
+                    contentDescription = null
+                )
+            },
+            iconButtonImage = {
+                Image(
+                    modifier = Modifier.fillMaxWidth(),
+                    painter = painterResource(R.drawable.logo),
+                    contentScale = ContentScale.FillWidth,
+                    contentDescription = null
+                )
+            })
     }
 
     @Composable
     private fun SmallCardPreview(count: Int) {
-        Box(modifier = Modifier.impression(count) {
-            Log.d(TAG, "SmallCard impression $count.")
-        }) {
-            SmallCard(
-                title = "Sample Small Card $count",
-                iconButtonImage = {
-                    Image(
-                        modifier = Modifier.fillMaxWidth(),
-                        painter = painterResource(R.drawable.logo),
-                        contentScale = ContentScale.FillWidth,
-                        contentDescription = null
-                    )
-                },
-                thumbnailImage = {
-                    Image(
-                        modifier = Modifier.fillMaxWidth(),
-                        painter = painterResource(R.drawable.flyer),
-                        contentScale = ContentScale.Crop,
-                        contentDescription = null
-                    )
-                })
-        }
+        SmallCard(
+            title = "Sample Small Card $count",
+            iconButtonImage = {
+                Image(
+                    modifier = Modifier.fillMaxWidth(),
+                    painter = painterResource(R.drawable.logo),
+                    contentScale = ContentScale.FillWidth,
+                    contentDescription = null
+                )
+            },
+            thumbnailImage = {
+                Image(
+                    modifier = Modifier.fillMaxWidth(),
+                    painter = painterResource(R.drawable.flyer),
+                    contentScale = ContentScale.Crop,
+                    contentDescription = null
+                )
+            })
     }
 
     private fun createData(): List<Int> = ((1..50).toList())
-    //endregion
+//endregion
 }

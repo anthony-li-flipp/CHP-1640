@@ -1,7 +1,6 @@
 package com.flipp.impressionsandbox.impression
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -42,15 +41,12 @@ fun <T : Any> Modifier.impression(
   )
 }
 
+@Composable
 fun <T : Any> Modifier.impression(
   key: T,
   impressionState: ImpressionState,
   onImpression: (key: T) -> Unit
-): Modifier = composed(
-  inspectorInfo = {
-    properties["key"] = key
-  }
-) {
+): Modifier = with(this) {
   val view = LocalView.current
   LaunchedEffect(key1 = key) {
     impressionState.impressFlow.collect {
@@ -80,18 +76,7 @@ fun <T : Any> Modifier.impression(
 val LocalImpressionState = compositionLocalOf<ImpressionState?> { null }
 
 @Composable
-fun ProvideImpressionState(value: ImpressionState, content: @Composable () -> Unit) {
-  CompositionLocalProvider(LocalImpressionState provides value, content = content)
-}
-
-@Composable
 fun rememberImpressionState(): ImpressionState {
-  val lifecycleOwner = LocalLifecycleOwner.current
-  return remember { DefaultImpressionState(lifecycleOwner.lifecycle) }
-}
-
-@Composable
-fun rememberDefaultImpressionState(): DefaultImpressionState {
   val lifecycleOwner = LocalLifecycleOwner.current
   return remember { DefaultImpressionState(lifecycleOwner.lifecycle) }
 }
@@ -100,14 +85,14 @@ class DefaultImpressionState(
   coroutinesLauncher: (block: suspend CoroutineScope.() -> Unit) -> Unit,
   private val impressionDurationMs: Long = DEFAULT_IMPRESSION_DURATION_MS,
   private val checkIntervalMs: Long = DEFAULT_CHECK_INTERVAL_MS,
-  private val visibleRatio: Float = DEFAULT_VISIBLE_RATIO,
+  private val visibleRatio: Float = DEFAULT_MINUMUM_VISIBLE_PERCENTAGE,
   private val currentTimeProducer: () -> Long = { System.currentTimeMillis() }
 ) : ImpressionState {
   constructor(
     lifecycle: Lifecycle,
     impressionDuration: Long = DEFAULT_IMPRESSION_DURATION_MS,
     checkInterval: Long = DEFAULT_CHECK_INTERVAL_MS,
-    visibleRatio: Float = DEFAULT_VISIBLE_RATIO,
+    visibleRatio: Float = DEFAULT_MINUMUM_VISIBLE_PERCENTAGE,
     currentTimeProducer: () -> Long = { System.currentTimeMillis() }
   ) : this(
     coroutinesLauncher = { block ->
@@ -127,7 +112,6 @@ class DefaultImpressionState(
   override val impressFlow: Flow<Any> = mutableSharedFlow.asSharedFlow()
 
   private val mutableVisibleItems: MutableMap<Any, VisibleItem> = mutableMapOf()
-  val visibleItems: Map<Any, VisibleItem> get() = mutableVisibleItems.toMap()
 
   private val mutableAlreadySentItems: MutableMap<Any, Impression> = mutableMapOf()
   val alreadySentItems: Map<Any, Impression> get() = mutableAlreadySentItems.toMap()
@@ -187,26 +171,14 @@ class DefaultImpressionState(
     }
   }
 
-  fun clearSentItems() {
-    mutableAlreadySentItems.clear()
-  }
-
-  fun setCurrentTimeToVisibleItemStartTime() {
-    val currentTimeMs = currentTimeProducer()
-    mutableVisibleItems.toMap().forEach { (key, value) ->
-      mutableVisibleItems[key] = value.copy(startTime = currentTimeMs)
-    }
-  }
-
   override fun onDispose(key: Any) {
     mutableVisibleItems.remove(key)
   }
 
   companion object {
-//    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 1000L
-    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 250L
-    const val DEFAULT_CHECK_INTERVAL_MS: Long = 1000L
-    const val DEFAULT_VISIBLE_RATIO: Float = 0.5F
+    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 500L
+    const val DEFAULT_CHECK_INTERVAL_MS: Long = 500L
+    const val DEFAULT_MINUMUM_VISIBLE_PERCENTAGE: Float = 0.5F
   }
 }
 
