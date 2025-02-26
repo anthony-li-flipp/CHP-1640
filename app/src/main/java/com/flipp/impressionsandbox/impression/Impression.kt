@@ -20,205 +20,146 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /**
- * Reference: https://github.com/abema/compose-impression-tracker
+ * Minimum amount of time a Composable must remain on screen before an impression is reported.
  */
-fun <T : Any> Modifier.impression(
-  key: T,
-  onImpression: (key: T) -> Unit
-) = composed {
-  impression(
-    key = key,
-    impressionState = LocalImpressionState.current ?: run {
-      rememberImpressionState()
-    },
-    onImpression = onImpression
-  )
-}
+private const val DEFAULT_IMPRESSION_DURATION_MS: Long = 500L
 
+/**
+ * Polling frequency for which impressions are checked/reported.
+ */
+private const val DEFAULT_CHECK_INTERVAL_MS: Long = 500L
+
+/**
+ * Adopted from https://github.com/abema/compose-impression-tracker
+ */
+@Composable
 fun <T : Any> Modifier.impression(
+  qualifier: ImpressionQualifier,
   key: T,
-  impressionState: ImpressionState,
-  onImpression: (key: T) -> Unit
-): Modifier = composed(
-  inspectorInfo = {
-    properties["key"] = key
-  }
-) {
+  onImpression: (key: T) -> Unit,
+): Modifier = with(this) {
   val view = LocalView.current
-  LaunchedEffect(key1 = key) {
-    impressionState.impressFlow.collect {
-      if (key == it) {
-        onImpression(key)
-      }
+  val lifecycleOwner = LocalLifecycleOwner.current
+  val impressionState = remember { ImpressionState(qualifier, lifecycleOwner.lifecycle) }
+
+  LaunchedEffect(key) {
+    impressionState.impressionFlow.collect {
+      onImpression(key)
     }
   }
   DisposableEffect(key1 = key) {
     onDispose {
-      impressionState.onDispose(key)
+      impressionState.onDisposed()
     }
   }
-  onGloballyPositioned { coordinate: LayoutCoordinates ->
-    val boundsInWindow = coordinate.boundsInWindow()
-    val globalRootRect = android.graphics.Rect()
-    view.getGlobalVisibleRect(globalRootRect)
-    impressionState.onLayoutCoordinatesChange(
-      key,
-      coordinate.size,
-      boundsInWindow,
-      globalRootRect.toComposeRect()
+
+  onGloballyPositioned { globalPosition: LayoutCoordinates ->
+    val visibleRect = android.graphics.Rect()
+      .apply { view.getGlobalVisibleRect(this) }
+      .toComposeRect()
+
+    impressionState.onGlobalPositionChanged(
+      globalPosition,
+      visibleRect
     )
   }
 }
 
-val LocalImpressionState = compositionLocalOf<ImpressionState?> { null }
+private class ImpressionState(
+  private val qualifier: ImpressionQualifier,
+  lifecycle: Lifecycle,
+) {
+  companion object {
+    private val now: Long get() = System.currentTimeMillis()
+  }
 
-@Composable
-fun ProvideImpressionState(value: ImpressionState, content: @Composable () -> Unit) {
-  CompositionLocalProvider(LocalImpressionState provides value, content = content)
-}
+  //region fields
+  private val impressionChannel = Channel<Any>()
+  val impressionFlow: Flow<Any> = impressionChannel.receiveAsFlow()
 
-@Composable
-fun rememberImpressionState(): ImpressionState {
-  val lifecycleOwner = LocalLifecycleOwner.current
-  return remember { DefaultImpressionState(lifecycleOwner.lifecycle) }
-}
+  private var impressionReported: Boolean = false
+  private var impressionStartTime: Long? = null
 
-@Composable
-fun rememberDefaultImpressionState(): DefaultImpressionState {
-  val lifecycleOwner = LocalLifecycleOwner.current
-  return remember { DefaultImpressionState(lifecycleOwner.lifecycle) }
-}
-
-class DefaultImpressionState(
-  coroutinesLauncher: (block: suspend CoroutineScope.() -> Unit) -> Unit,
-  private val impressionDurationMs: Long = DEFAULT_IMPRESSION_DURATION_MS,
-  private val checkIntervalMs: Long = DEFAULT_CHECK_INTERVAL_MS,
-  private val visibleRatio: Float = DEFAULT_VISIBLE_RATIO,
-  private val currentTimeProducer: () -> Long = { System.currentTimeMillis() }
-) : ImpressionState {
-  constructor(
-    lifecycle: Lifecycle,
-    impressionDuration: Long = DEFAULT_IMPRESSION_DURATION_MS,
-    checkInterval: Long = DEFAULT_CHECK_INTERVAL_MS,
-    visibleRatio: Float = DEFAULT_VISIBLE_RATIO,
-    currentTimeProducer: () -> Long = { System.currentTimeMillis() }
-  ) : this(
-    coroutinesLauncher = { block ->
-      lifecycle.coroutineScope.launch {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-          block()
-        }
-      }
-    },
-    impressionDurationMs = impressionDuration,
-    checkIntervalMs = checkInterval,
-    visibleRatio = visibleRatio,
-    currentTimeProducer = currentTimeProducer
-  )
-
-  private val mutableSharedFlow = MutableSharedFlow<Any>()
-  override val impressFlow: Flow<Any> = mutableSharedFlow.asSharedFlow()
-
-  private val mutableVisibleItems: MutableMap<Any, VisibleItem> = mutableMapOf()
-  val visibleItems: Map<Any, VisibleItem> get() = mutableVisibleItems.toMap()
-
-  private val mutableAlreadySentItems: MutableMap<Any, Impression> = mutableMapOf()
-  val alreadySentItems: Map<Any, Impression> get() = mutableAlreadySentItems.toMap()
-
-  var currentLoopCount = -1L
-    private set
-
-  data class VisibleItem(val key: Any, val startTime: Long)
-  data class Impression(val key: Any, val impressionLoopCount: Long)
+  private val impressionElapsed: Boolean
+    get() = impressionStartTime?.let { startTime ->
+      now - startTime >= DEFAULT_IMPRESSION_DURATION_MS
+    } == true
+  //endregion fields
 
   init {
-    coroutinesLauncher {
-      while (true) {
-        currentLoopCount++
-        val time = currentTimeProducer()
-        val impressions = mutableVisibleItems.values.toList().filter {
-          it.startTime <= time - impressionDurationMs && !alreadySentItems.containsKey(it.key)
+    lifecycle.coroutineScope.launch(Dispatchers.Default) {
+      lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        while (true) {
+          // check if Composable is not yet reported an elapsed the minimum time on screen
+          if (!impressionReported && impressionElapsed) {
+            impressionReported = true
+            impressionChannel.send(Any())
+          }
+          delay(DEFAULT_CHECK_INTERVAL_MS)
         }
-        impressions.forEach { impression ->
-          mutableAlreadySentItems[impression.key] = Impression(impression.key, currentLoopCount)
-          mutableSharedFlow.emit(impression.key)
-        }
-        delay(checkIntervalMs)
       }
     }
   }
 
-  override fun onLayoutCoordinatesChange(
-    key: Any,
-    size: IntSize,
-    boundsRect: Rect,
-    composeViewRect: Rect
+  /**
+   * Handles the event where the global position of the tracked Composable has changed.
+   *
+   * @param viewGlobalCoordinates the [LayoutCoordinates] of the tracked Composable.
+   * @param viewGlobalVisibleRect the [Rect] describing the container bounds of the tracked Composable.
+   */
+  fun onGlobalPositionChanged(
+    viewGlobalCoordinates: LayoutCoordinates,
+    viewGlobalVisibleRect: Rect
   ) {
-    if (mutableAlreadySentItems.contains(key)) {
+    if (impressionReported) {
+      // impression already reported - skip calculating impression
       return
     }
 
-    val componentArea = size.width * size.height
-    val top = maxOf(boundsRect.top, composeViewRect.top)
-    val bottom = minOf(boundsRect.bottom, composeViewRect.bottom)
-    val visibleHeight = bottom - top
-    if (visibleHeight < 0) return onDispose(key)
+    val viewBoundsInWindow = viewGlobalCoordinates.boundsInWindow()
 
-    val left = maxOf(boundsRect.left, composeViewRect.left)
-    val right = minOf(boundsRect.right, composeViewRect.right)
-    val visibleWidth = right - left
-    if (visibleWidth < 0) return onDispose(key)
-
-    val visibleArea = visibleWidth * visibleHeight
-
-    if (visibleArea / componentArea >= visibleRatio) {
-      mutableVisibleItems.getOrPut(key) {
-        VisibleItem(key, currentTimeProducer())
-      }
-    } else {
-      onDispose(key)
+    val visibleTop = maxOf(viewBoundsInWindow.top, viewGlobalVisibleRect.top)
+    val visibleBottom = minOf(viewBoundsInWindow.bottom, viewGlobalVisibleRect.bottom)
+    val visibleHeightPx = (visibleBottom - visibleTop).toInt()
+    if (visibleHeightPx < 0) {
+      // vertical component of view is off-screen
+      return onDisposed()
     }
-  }
 
-  fun clearSentItems() {
-    mutableAlreadySentItems.clear()
-  }
-
-  fun setCurrentTimeToVisibleItemStartTime() {
-    val currentTimeMs = currentTimeProducer()
-    mutableVisibleItems.toMap().forEach { (key, value) ->
-      mutableVisibleItems[key] = value.copy(startTime = currentTimeMs)
+    val visibleLeft = maxOf(viewBoundsInWindow.left, viewGlobalVisibleRect.left)
+    val visibleRight = minOf(viewBoundsInWindow.right, viewGlobalVisibleRect.right)
+    val visibleWidthPx = (visibleRight - visibleLeft).toInt()
+    if (visibleWidthPx < 0) {
+      // horizontal component of view is off-screen
+      return onDisposed()
     }
+
+    val globalWidthPx = viewGlobalCoordinates.size.width
+    val globalHeightPx = viewGlobalCoordinates.size.height
+
+    impressionStartTime = qualifier.isImpression(
+      visibleWidthPx = visibleWidthPx,
+      visibleHeightPx = visibleHeightPx,
+      globalWidthPx = globalWidthPx,
+      globalHeightPx = globalHeightPx
+    ).let { isImpression -> if (isImpression) impressionStartTime ?: now else null }
   }
 
-  override fun onDispose(key: Any) {
-    mutableVisibleItems.remove(key)
+  /**
+   * Handles the event where the tracked Composable is no longer on screen.
+   */
+  fun onDisposed() {
+    impressionReported = false
+    impressionStartTime = null
   }
-
-  companion object {
-//    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 1000L
-    const val DEFAULT_IMPRESSION_DURATION_MS: Long = 250L
-    const val DEFAULT_CHECK_INTERVAL_MS: Long = 1000L
-    const val DEFAULT_VISIBLE_RATIO: Float = 0.5F
-  }
-}
-
-interface ImpressionState {
-  val impressFlow: Flow<Any>
-
-  fun onLayoutCoordinatesChange(
-    key: Any,
-    size: IntSize,
-    boundsRect: Rect,
-    composeViewRect: Rect
-  )
-
-  fun onDispose(key: Any)
 }

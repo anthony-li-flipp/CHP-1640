@@ -26,20 +26,28 @@ import androidx.compose.material.TabRowDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toComposeRect
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.flipp.dl.design.composables.LargeCard
 import com.flipp.dl.design.composables.SmallCard
+import com.flipp.impressionsandbox.impression.ImpressionQualifier
+import com.flipp.impressionsandbox.impression.PercentageViewableQualifier
 import com.flipp.impressionsandbox.impression.impression
 import com.flipp.impressionsandbox.ui.theme.ImpressionSandboxTheme
 import com.google.accompanist.pager.ExperimentalPagerApi
@@ -49,16 +57,79 @@ import com.google.accompanist.pager.pagerTabIndicatorOffset
 import com.google.accompanist.pager.rememberPagerState
 import kotlinx.coroutines.launch
 
+
+@Composable
+fun <T : Any> Modifier.track(
+    qualifier: ImpressionQualifier,
+    key: T,
+    impressionableChanged: (Boolean) -> Unit
+): Modifier = with(this) {
+    val view = LocalView.current
+    var impressionable: Boolean? = null
+
+    fun notify(value: Boolean) {
+        if (impressionable != value) {
+            impressionable = value
+            impressionableChanged(value)
+        }
+    }
+
+    DisposableEffect(key) {
+        onDispose {
+            notify(false)
+        }
+    }
+
+    onGloballyPositioned { viewGlobalCoordinates: LayoutCoordinates ->
+        val viewGlobalVisibleRect = android.graphics.Rect()
+            .apply { view.getGlobalVisibleRect(this) }
+            .toComposeRect()
+
+        val viewBoundsInWindow = viewGlobalCoordinates.boundsInWindow()
+
+        val visibleTop = maxOf(viewBoundsInWindow.top, viewGlobalVisibleRect.top)
+        val visibleBottom = minOf(viewBoundsInWindow.bottom, viewGlobalVisibleRect.bottom)
+        val visibleHeightPx = (visibleBottom - visibleTop).toInt()
+        if (visibleHeightPx < 0) {
+            // vertical component of view is off-screen
+            notify(false)
+        }
+
+        val visibleLeft = maxOf(viewBoundsInWindow.left, viewGlobalVisibleRect.left)
+        val visibleRight = minOf(viewBoundsInWindow.right, viewGlobalVisibleRect.right)
+        val visibleWidthPx = (visibleRight - visibleLeft).toInt()
+        if (visibleWidthPx < 0) {
+            // horizontal component of view is off-screen
+            notify(false)
+        }
+
+        val globalWidthPx = viewGlobalCoordinates.size.width
+        val globalHeightPx = viewGlobalCoordinates.size.height
+
+        val value = qualifier.isImpression(
+            visibleWidthPx = visibleWidthPx,
+            visibleHeightPx = visibleHeightPx,
+            globalWidthPx = globalWidthPx,
+            globalHeightPx = globalHeightPx
+        )
+
+        Log.d("MainActivity", "Calculate $key $value")
+        notify(value)
+    }
+}
+
+
 class MainActivity : ComponentActivity() {
     companion object {
         private val TAG = MainActivity::class.java.simpleName
+        private const val IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE: Float = 0.5F
     }
 
     @OptIn(ExperimentalPagerApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var isDarkTheme by remember { mutableStateOf(false) }
+            val isDarkTheme by remember { mutableStateOf(false) }
 
             ImpressionSandboxTheme(darkTheme = isDarkTheme) {
                 val pagerState = rememberPagerState(pageCount = 4)
@@ -111,24 +182,68 @@ class MainActivity : ComponentActivity() {
     //region helper methods
     @Composable
     private fun Screen1() {
-        val lazyListState = rememberLazyListState()
+        val verticalListState = rememberLazyListState()
+        val horizontalListState = rememberLazyListState()
+
         val items by remember { mutableStateOf(createData()) }
+        val impressionable = remember { mutableSetOf<Int>() }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
-            state = lazyListState,
+            state = verticalListState,
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(items) { count ->
                 if (count == 5) LazyRow(
-                    state = rememberLazyListState(),
+                    state = horizontalListState,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
-                ) { items((31..50).toList()) { count -> SmallCardPreview(count = count) } }
-                else LargeCardPreview(count = count)
+                ) {
+                    items((31..50).toList()) { count ->
+                        SmallCardPreview(
+                            modifier = Modifier.impression(
+                                qualifier = PercentageViewableQualifier(
+                                    IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE
+                                ),
+                                key = count,
+                                onImpression = {
+                                    Log.d(TAG, "SmallCard impression $count.")
+                                }
+                            ),
+                            count = count
+                        )
+                    }
+                }
+                else LargeCardPreview(
+                    modifier = Modifier.track(
+                        qualifier = PercentageViewableQualifier(
+                            IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE
+                        ),
+                        key = count,
+                        impressionableChanged = { value ->
+                            val action = if (value) impressionable::add
+                            else impressionable::remove
+
+                            action.invoke(count)
+                        }
+                    ),
+                    count = count
+                )
             }
+        }
+
+        LaunchedEffect(verticalListState.isScrollInProgress, items.size) {
+            if (!verticalListState.isScrollInProgress) {
+                Log.d(TAG, "Impressions ${impressionable.joinToString(",")}")
+            }
+
+            Log.d(TAG, "Scrolling vertical ${verticalListState.isScrollInProgress}.")
+        }
+
+        LaunchedEffect(horizontalListState.isScrollInProgress, items.size) {
+            Log.d(TAG, "Scrolling horizontal ${horizontalListState.isScrollInProgress}.")
         }
     }
 
@@ -139,7 +254,19 @@ class MainActivity : ComponentActivity() {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            LargeCardPreview(count = 100)
+            val count = remember { 100 }
+            LargeCardPreview(
+                modifier = Modifier.impression(
+                    qualifier = PercentageViewableQualifier(
+                        IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE
+                    ),
+                    key = count,
+                    onImpression = {
+                        Log.d(TAG, "LargeCard impression $count.")
+                    }
+                ),
+                count = count
+            )
         }
     }
 
@@ -150,13 +277,27 @@ class MainActivity : ComponentActivity() {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            SmallCardPreview(count = 101)
+            val count = remember { 101 }
+            SmallCardPreview(
+                modifier = Modifier.impression(
+                    qualifier = PercentageViewableQualifier(
+                        IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE
+                    ),
+                    key = count,
+                    onImpression = {
+                        Log.d(TAG, "SmallCard impression $count.")
+                    }
+                ),
+                count = count
+            )
         }
     }
 
     @Composable
     private fun Screen4() {
         val items = remember { mutableStateListOf<Int>() }
+        val lazyListState = rememberLazyListState()
+
         Column {
             Row {
                 Button(onClick = { items.add(items.size) }) { Text(text = "Add") }
@@ -164,20 +305,35 @@ class MainActivity : ComponentActivity() {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
-                state = rememberLazyListState(),
+                state = lazyListState,
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(items) { count -> LargeCardPreview(count = count) }
+                items(items) { count ->
+                    LargeCardPreview(
+                        modifier = Modifier.impression(
+                            qualifier = PercentageViewableQualifier(
+                                IMPRESSION_MINIMUM_VISIBLE_PERCENTAGE
+                            ),
+                            key = count,
+                            onImpression = {
+                                Log.d(TAG, "LargeCard impression $count.")
+                            }
+                        ),
+                        count = count
+                    )
+                }
             }
+        }
+
+        LaunchedEffect(lazyListState.isScrollInProgress, items.size) {
+            Log.d(TAG, "User is scrolling ${lazyListState.isScrollInProgress}.")
         }
     }
 
     @Composable
-    private fun LargeCardPreview(count: Int) {
-        Box(modifier = Modifier.impression(count) {
-            Log.d(TAG, "LargeCard impression $count.")
-        }) {
+    private fun LargeCardPreview(modifier: Modifier, count: Int) {
+        Box(modifier = modifier) {
             LargeCard(
                 title = "Sample Large Card $count",
                 titleThumbnailImage = {
@@ -208,10 +364,8 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SmallCardPreview(count: Int) {
-        Box(modifier = Modifier.impression(count) {
-            Log.d(TAG, "SmallCard impression $count.")
-        }) {
+    private fun SmallCardPreview(modifier: Modifier, count: Int) {
+        Box(modifier = modifier) {
             SmallCard(
                 title = "Sample Small Card $count",
                 iconButtonImage = {
