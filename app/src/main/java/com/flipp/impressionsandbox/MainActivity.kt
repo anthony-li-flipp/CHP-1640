@@ -1,6 +1,5 @@
 package com.flipp.impressionsandbox
 
-import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -37,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.flipp.dl.design.composables.LargeCard
@@ -68,7 +66,7 @@ class MainActivity : ComponentActivity() {
                     TabLayout(listOf("Screen 1", "Screen 2", "Screen 3", "Screen 4"), pagerState)
                     HorizontalPager(state = pagerState) { index ->
                         when (index) {
-                            0 -> Screen1 { isDarkTheme = isDarkTheme.not() }
+                            0 -> Screen1()
                             1 -> Screen2()
                             2 -> Screen3()
                             3 -> Screen4()
@@ -112,46 +110,24 @@ class MainActivity : ComponentActivity() {
 
     //region helper methods
     @Composable
-    private fun Screen1(onToggleDarkTheme: () -> Unit) {
-        val context = LocalContext.current
+    private fun Screen1() {
         val lazyListState = rememberLazyListState()
-        val scope = rememberCoroutineScope()
-        var items by remember { mutableStateOf(createData()) }
+        val items by remember { mutableStateOf(createData()) }
 
-        Column {
-            Row {
-                Button(onClick = {
-                    scope.launch {
-                        items = createData()
-                        lazyListState.scrollToItem(0)
-                    }
-                }) { Text(text = "Refresh") }
-                Button(onClick = { startActivity(Intent(context, SettingsActivity::class.java)) }) {
-                    Text(
-                        text = "Navigate"
-                    )
-                }
-                Button(onClick = onToggleDarkTheme) {
-                    Text(
-                        text = "Theme"
-                    )
-                }
-            }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                state = lazyListState,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(items) { count ->
-                    if (count == 5) LazyRow(
-                        state = rememberLazyListState(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) { items((31..50).toList()) { count -> SmallCardPreview(count = count) } }
-                    else LargeCardPreview(count = count)
-                }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            state = lazyListState,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(items) { count ->
+                if (count == 5) LazyRow(
+                    state = rememberLazyListState(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) { items((31..50).toList()) { count -> SmallCardPreview(count = count) } }
+                else LargeCardPreview(count = count)
             }
         }
     }
@@ -180,7 +156,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Screen4() {
-        val items = remember { mutableStateListOf<Int>()}
+        val items = remember { mutableStateListOf<Int>() }
         Column {
             Row {
                 Button(onClick = { items.add(items.size) }) { Text(text = "Add") }
